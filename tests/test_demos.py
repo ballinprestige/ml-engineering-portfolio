@@ -8,6 +8,7 @@ the scripts run.
 
 import drift_detection as drift
 import probability_calibration as cal
+import real_data_pipeline as rdp
 import shap_feature_selection as sfs
 import walk_forward_validation as wfv
 
@@ -36,3 +37,10 @@ def test_drift_flags_shifted_features():
     assert r["psi"][0] > drift.ALERT  # mean-shifted feature is flagged
     assert r["psi"][1] < drift.WATCH  # stable feature is not
     assert "feature_0" in r["flagged"]
+
+
+def test_real_data_pipeline_handles_messy_data():
+    r = rdp.evaluate(seeds=range(3))
+    assert r["n_missing_total"] > 0  # impossible zeros recoded as missing
+    assert r["auc_uncal_mean"] > 0.7  # learns real signal on a real dataset
+    assert r["brier_cal_mean"] <= r["brier_uncal_mean"] + 0.005  # calibration doesn't hurt

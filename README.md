@@ -7,12 +7,13 @@
 
 A small **methods toolkit** for the production-ML concerns that decide whether a model that
 looks good offline actually holds up live: leakage-safe validation, probability calibration,
-honest feature selection, and drift monitoring. Every demo is self-contained, deterministic,
-runs on synthetic data, and its **headline claim is enforced by a test in CI** — measured
-out-of-sample, reported as mean ± std across seeds, not a single lucky number.
+honest feature selection, and drift monitoring. Every demo is self-contained, deterministic, and
+its **headline claim is enforced by a test in CI** — measured out-of-sample, reported as mean ±
+std across seeds, not a single lucky number.
 
-> Scope note: these are **methodology demonstrations on synthetic data**, not a deployed
-> service. The point is correct evaluation protocol, not infrastructure.
+> Scope note: four demos isolate a single concept on **synthetic benchmarks**; one runs
+> end-to-end on a **messy real public dataset** (with the wrangling that implies). These are
+> methodology demonstrations, not a deployed service — the point is correct evaluation protocol.
 
 ## Contents
 - [Production pipeline (reference architecture)](#production-pipeline-reference-architecture)
@@ -20,6 +21,7 @@ out-of-sample, reported as mean ± std across seeds, not a single lucky number.
 - [2 · Probability calibration](#2--probability-calibration)
 - [3 · SHAP-driven feature selection](#3--shap-driven-feature-selection)
 - [4 · Feature drift detection](#4--feature-drift-detection)
+- [5 · Real-data pipeline](#5--real-data-pipeline-messy-public-data)
 - [Notebook walkthrough](#notebook-walkthrough) · [Run it](#run-it)
 
 ---
@@ -130,8 +132,28 @@ it doesn't by itself mean accuracy dropped.
 
 ---
 
+## 5 · Real-data pipeline (messy public data)
+
+Synthetic demos isolate one idea; real data is where the wrangling lives. On the **Pima Indians
+Diabetes** dataset (UCI / OpenML), several columns record physiologically-impossible **zeros**
+that are really *missing* (insulin = 0, blood pressure = 0, …) — a classic trap. The pipeline
+recodes them, then **imputes and scales inside a `Pipeline` fit on the training split only** (so
+the test set never informs its own imputation), and calibrates on validation before reporting on
+an untouched test split:
+
+| | value |
+|---|---|
+| Impossible-zero values recoded as missing | **652** (across 768 rows) |
+| Test ROC AUC | 0.817 ± 0.030 |
+| Brier (uncalibrated → calibrated) | 0.1708 → 0.1683 |
+
+![Real-data pipeline](images/real_data_pipeline.png)
+→ [`src/real_data_pipeline.py`](src/real_data_pipeline.py) · data: [`data/pima_diabetes.csv`](data/pima_diabetes.csv)
+
+---
+
 ## Notebook walkthrough
-A narrative version with all four demos:
+A narrative version with the four synthetic demos:
 [`notebooks/portfolio_walkthrough.ipynb`](notebooks/portfolio_walkthrough.ipynb)
 
 ## Run it

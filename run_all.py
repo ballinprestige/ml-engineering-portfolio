@@ -15,6 +15,7 @@ DEMOS = [
     "probability_calibration",
     "shap_feature_selection",
     "drift_detection",
+    "real_data_pipeline",
 ]
 
 
