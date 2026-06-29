@@ -155,4 +155,4 @@ examples.
 
 **Stack:** Python · scikit-learn · XGBoost · SHAP · SciPy · pandas · NumPy · matplotlib
 
-📫 kyleandgeorgi@gmail.com
+📫 kyleandgeorgi@gmail.com · [LinkedIn](https://www.linkedin.com/in/kyle-reynolds-29865423a/)
