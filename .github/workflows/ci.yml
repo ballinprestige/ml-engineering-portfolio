@@ -29,3 +29,23 @@ jobs:
         run: python run_all.py
       - name: Execute notebook
         run: jupyter nbconvert --to notebook --execute --inplace notebooks/portfolio_walkthrough.ipynb
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build service image
+        run: docker build -t ml-portfolio-service .
+      - name: Run container and smoke-test /health and /predict
+        run: |
+          docker run -d -p 8000:8000 --name svc ml-portfolio-service
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000/health; then echo " healthy"; break; fi
+            sleep 2
+          done
+          curl -sf http://localhost:8000/health || { docker logs svc; exit 1; }
+          curl -sf -X POST http://localhost:8000/predict \
+            -H 'Content-Type: application/json' \
+            -d '{"pregnancies":6,"glucose":148,"blood_pressure":72,"skin_thickness":35,"insulin":0,"bmi":33.6,"diabetes_pedigree":0.627,"age":50}' \
+            || { docker logs svc; exit 1; }
+          docker rm -f svc

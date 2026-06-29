@@ -12,8 +12,8 @@ its **headline claim is enforced by a test in CI** — measured out-of-sample, r
 std across seeds, not a single lucky number.
 
 > Scope note: four demos isolate a single concept on **synthetic benchmarks**; one runs
-> end-to-end on a **messy real public dataset** (with the wrangling that implies). These are
-> methodology demonstrations, not a deployed service — the point is correct evaluation protocol.
+> end-to-end on a **messy real public dataset**; and a **FastAPI service** (model registry +
+> Docker) serves the trained, calibrated model. Reproducible and CI-tested throughout.
 
 ## Contents
 - [Production pipeline (reference architecture)](#production-pipeline-reference-architecture)
@@ -149,6 +149,32 @@ an untouched test split:
 
 ![Real-data pipeline](images/real_data_pipeline.png)
 → [`src/real_data_pipeline.py`](src/real_data_pipeline.py) · data: [`data/pima_diabetes.csv`](data/pima_diabetes.csv)
+
+---
+
+## Serving (FastAPI + model registry + Docker)
+
+The methods above ship as a small but real service: a FastAPI app serves the trained, calibrated
+model, backed by a versioned model registry with artifact lineage.
+
+- **Train + register** — `python -m service.train` fits the calibrated pipeline (recode → impute →
+  scale → gradient boosting → isotonic calibration, fit on train only) and writes a versioned
+  artifact + `metadata.json` (metrics, feature list, data source, library versions, timestamp) to
+  `models/registry/`.
+- **Serve** — `uvicorn service.app:app` exposes `GET /health` (liveness + model version),
+  `GET /model` (metadata/lineage), and `POST /predict` (Pydantic-validated input — the schema
+  gate — returns a calibrated probability, each request logged). Trains a model on first startup
+  if the registry is empty.
+- **Containerized** — `docker build -t ml-portfolio-service . && docker run -p 8000:8000 ml-portfolio-service`. CI builds the image on every push.
+
+```python
+import requests
+requests.post("http://localhost:8000/predict", json={
+    "pregnancies": 6, "glucose": 148, "blood_pressure": 72, "skin_thickness": 35,
+    "insulin": 0, "bmi": 33.6, "diabetes_pedigree": 0.627, "age": 50,
+}).json()
+# -> {"probability": 0.7, "prediction": 1, "model_version": 1}
+```
 
 ---
 

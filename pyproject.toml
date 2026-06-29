@@ -18,6 +18,10 @@ dependencies = [
     "matplotlib>=3.7,<4",
     "shap>=0.44,<1",
     "xgboost>=2.0,<4",
+    "joblib>=1.3,<2",
+    "fastapi>=0.110,<1",
+    "uvicorn>=0.27,<1",
+    "pydantic>=2,<3",
 ]
 
 [tool.setuptools]
@@ -26,7 +30,9 @@ py-modules = [
     "probability_calibration",
     "shap_feature_selection",
     "drift_detection",
+    "real_data_pipeline",
 ]
+packages = ["service"]
 
 [tool.setuptools.package-dir]
 "" = "src"

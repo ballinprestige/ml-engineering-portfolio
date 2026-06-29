@@ -1,0 +1,13 @@
+.git
+.github
+__pycache__
+*.pyc
+images
+notebooks
+tests
+models
+*.md
+.gitignore
+.gitattributes
+requirements-dev.txt
+*.egg-info
