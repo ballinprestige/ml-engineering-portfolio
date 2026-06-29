@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ml-engineering-portfolio"
 version = "0.1.0"
@@ -15,6 +19,17 @@ dependencies = [
     "shap>=0.44,<1",
     "xgboost>=2.0,<4",
 ]
+
+[tool.setuptools]
+py-modules = [
+    "walk_forward_validation",
+    "probability_calibration",
+    "shap_feature_selection",
+    "drift_detection",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
 
 [tool.ruff]
 line-length = 100

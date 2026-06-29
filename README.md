@@ -1,7 +1,7 @@
 # ML Engineering Portfolio — Kyle Reynolds
 
 ![CI](https://github.com/ballinprestige/ml-engineering-portfolio/actions/workflows/ci.yml/badge.svg)
-![Python](https://img.shields.io/badge/python-3.12-blue)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)
 
@@ -33,10 +33,10 @@ flowchart LR
     C --> D[("Feature store")]
     D --> E["Training"]
     E --> F["Validation<br/>(walk-forward, leakage audit,<br/>calibration)"]
-    F --> G{"Promotion gate<br/>shadow compare → rollback"}
+    F --> G{"Promotion gate<br/>shadow compare, rollback"}
     G --> H["Serving"]
     H --> I["Drift / data-health<br/>monitoring"]
-    I -->|alert → investigate / retrain| C
+    I -->|"alert: investigate / retrain"| C
 ```
 
 Schema checks gate the data *before* training; calibration is part of *validation*; shadow
