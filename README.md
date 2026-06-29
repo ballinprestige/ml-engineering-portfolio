@@ -1,13 +1,27 @@
 # ML Engineering Portfolio — Kyle Reynolds
 
+![CI](https://github.com/ballinprestige/ml-engineering-portfolio/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)
+
 Production-minded machine learning: the techniques that decide whether a model
-that looks good offline actually holds up live. Each demo below is small,
-self-contained, runs on synthetic/public data, and reproduces a figure. These
-are the same methods I rely on operating an end-to-end production ML system
-([about](#about)).
+that looks good offline actually holds up live. Every demo is small,
+self-contained, deterministic, runs on synthetic data, and reproduces a figure —
+and the headline result of each is enforced by a test in CI.
 
 **Focus areas:** leakage-safe validation · probability calibration · SHAP-driven
-feature selection · gradient-boosted ensembles · reproducible ML pipelines.
+feature selection · drift monitoring · reproducible ML pipelines.
+
+## Contents
+
+- [Production pipeline (architecture)](#production-pipeline-architecture)
+- [1 · Leakage-safe time-series validation](#1--leakage-safe-time-series-validation)
+- [2 · Probability calibration](#2--probability-calibration)
+- [3 · SHAP-driven feature selection](#3--shap-driven-feature-selection)
+- [4 · Feature drift detection](#4--feature-drift-detection)
+- [Notebook walkthrough](#notebook-walkthrough)
+- [Run it](#run-it)
 
 ---
 
@@ -90,17 +104,45 @@ the top-k preserves performance while shrinking the model **4×**:
 
 ---
 
+## 4 · Feature drift detection
+
+A deployed model silently degrades when the live data distribution drifts from
+training. Population Stability Index (PSI) and the Kolmogorov–Smirnov test flag
+*which* features have shifted — here a mean shift and a scale change trip the
+alert threshold, while the stable features stay near zero:
+
+| Feature | PSI | Status |
+|---|---|---|
+| feature_0 (mean shift) | 1.26 | **alert** |
+| feature_2 (scale change) | 0.37 | **alert** |
+| feature_4 (moderate shift) | 0.24 | watch |
+| stable features | < 0.01 | ok |
+
+![Drift detection](images/drift_detection.png)
+
+→ [`src/drift_detection.py`](src/drift_detection.py)
+
+---
+
+## Notebook walkthrough
+
+A narrative version with all four demos and inline results:
+[`notebooks/portfolio_walkthrough.ipynb`](notebooks/portfolio_walkthrough.ipynb)
+
 ## Run it
 
 ```bash
 pip install -r requirements.txt
-python src/walk_forward_validation.py
-python src/probability_calibration.py
-python src/shap_feature_selection.py
+python run_all.py          # run all four demos, regenerate every figure
+
+# development
+pip install -r requirements-dev.txt
+pytest -q                  # each demo's headline result is asserted here
+ruff check src tests
 ```
 
-Each script prints its metrics and writes its figure to `images/`. Results are
-deterministic (fixed seeds).
+Results are deterministic (fixed seeds); CI runs the tests and all demos on every
+push.
 
 ## About
 
@@ -111,6 +153,6 @@ walk-forward backtesting, and automated daily retraining with monitoring and
 rollback. This repository distills the core methods into small, reproducible
 examples.
 
-**Stack:** Python · scikit-learn · XGBoost · SHAP · pandas · NumPy · matplotlib
+**Stack:** Python · scikit-learn · XGBoost · SHAP · SciPy · pandas · NumPy · matplotlib
 
 📫 kyleandgeorgi@gmail.com

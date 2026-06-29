@@ -1,0 +1,15 @@
+[project]
+name = "ml-engineering-portfolio"
+version = "0.1.0"
+description = "Production-minded ML demos: leakage-safe validation, calibration, SHAP selection, drift detection."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Kyle Reynolds" }]
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# E402: module-level import not at top — intentional for setting the matplotlib backend.
+ignore = ["E402"]
