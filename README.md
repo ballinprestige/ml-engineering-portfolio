@@ -5,111 +5,112 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)
 
-Production-minded machine learning: the techniques that decide whether a model
-that looks good offline actually holds up live. Every demo is small,
-self-contained, deterministic, runs on synthetic data, and reproduces a figure —
-and the headline result of each is enforced by a test in CI.
+A small **methods toolkit** for the production-ML concerns that decide whether a model that
+looks good offline actually holds up live: leakage-safe validation, probability calibration,
+honest feature selection, and drift monitoring. Every demo is self-contained, deterministic,
+runs on synthetic data, and its **headline claim is enforced by a test in CI** — measured
+out-of-sample, reported as mean ± std across seeds, not a single lucky number.
 
-**Focus areas:** leakage-safe validation · probability calibration · SHAP-driven
-feature selection · drift monitoring · reproducible ML pipelines.
+> Scope note: these are **methodology demonstrations on synthetic data**, not a deployed
+> service. The point is correct evaluation protocol, not infrastructure.
 
 ## Contents
-
-- [Production pipeline (architecture)](#production-pipeline-architecture)
+- [Production pipeline (reference architecture)](#production-pipeline-reference-architecture)
 - [1 · Leakage-safe time-series validation](#1--leakage-safe-time-series-validation)
 - [2 · Probability calibration](#2--probability-calibration)
 - [3 · SHAP-driven feature selection](#3--shap-driven-feature-selection)
 - [4 · Feature drift detection](#4--feature-drift-detection)
-- [Notebook walkthrough](#notebook-walkthrough)
-- [Run it](#run-it)
+- [Notebook walkthrough](#notebook-walkthrough) · [Run it](#run-it)
 
 ---
 
-## Production pipeline (architecture)
-
-The pattern behind the demos — how the pieces fit in a real, continuously
-retrained system:
+## Production pipeline (reference architecture)
 
 ```mermaid
 flowchart LR
-    A["Real-time data sources<br/>APIs and feeds"] --> B["Event-driven<br/>feature engineering"]
-    B --> C[("Parquet feature store<br/>PostgreSQL")]
-    C --> D["Daily training<br/>gradient-boosted ensemble"]
-    D --> E["Probability<br/>calibration"]
-    E --> F["Walk-forward backtest<br/>and leakage audit"]
-    F --> G{"Promotion gate<br/>schema / shadow / rollback"}
-    G --> H["Live serving"]
-    H --> I["Drift and<br/>data-health monitoring"]
-    I --> B
+    A["Ingestion<br/>APIs and feeds"] --> B["Schema / data-contract<br/>checks"]
+    B --> C["Feature engineering"]
+    C --> D[("Feature store")]
+    D --> E["Training"]
+    E --> F["Validation<br/>(walk-forward, leakage audit,<br/>calibration)"]
+    F --> G{"Promotion gate<br/>shadow compare → rollback"}
+    G --> H["Serving"]
+    H --> I["Drift / data-health<br/>monitoring"]
+    I -->|alert → investigate / retrain| C
 ```
+
+Schema checks gate the data *before* training; calibration is part of *validation*; shadow
+comparison and rollback are one *promotion gate*; drift monitoring closes the loop.
 
 ---
 
 ## 1 · Leakage-safe time-series validation
 
-Random K-fold cross-validation quietly leaks future information on time-ordered
-data: shuffling puts samples from every period into training, so the model is
-scored on conditions it has already seen. Walk-forward validation always trains
-on the past and tests on the future — the way the model is actually deployed.
+How you split time-ordered data changes the estimate you get. This is a **controlled**
+comparison — both models train on the **same number of rows (W)**, so the only difference is
+*which* rows are allowed:
 
-On data with a regime switch (the signal moves from one feature to another over
-time), random K-fold reports a higher, over-optimistic score:
+- **time-respecting** — the W rows immediately *before* each test block (deployment-realistic).
+- **leakage** — W rows from the test block's own era, *including future-adjacent rows*.
 
-| Validation scheme | ROC AUC |
+Under smooth linear drift, peeking at the test era inflates the score. Reported across 10 seeds:
+
+| Training rows (matched size W) | ROC AUC |
 |---|---|
-| Random K-fold (shuffled) | **0.814** |
-| Walk-forward (time-aware) | **0.788** |
-| **Optimism from leakage** | **+0.026** |
+| Leakage (test-era + future) | **0.852 ± 0.005** |
+| Time-respecting (past only) | **0.840 ± 0.005** |
+| **Temporal-validation optimism** | **+0.012 ± 0.002** |
 
-![Walk-forward vs K-fold](images/walk_forward_validation.png)
+A small but robust effect — and it's isolated to *row selection*, not training-set size.
 
+![Walk-forward vs leakage](images/walk_forward_validation.png)
 → [`src/walk_forward_validation.py`](src/walk_forward_validation.py)
 
 ---
 
 ## 2 · Probability calibration
 
-A model can rank well yet output untrustworthy probabilities — when it says 0.9
-it may be right only 70% of the time. Isotonic calibration on a held-out set
-fixes the probability *scale* without changing the ranking (AUC unchanged),
-improving the Brier score:
+A model can rank well yet be miscalibrated. Isotonic calibration (fit on a held-out set) lowers
+the Brier score; because it's monotone the ranking is *nearly* unchanged — and we **measure**
+that rather than assert it. Across 5 seeds:
 
 | Metric | Uncalibrated | Isotonic-calibrated |
 |---|---|---|
-| Brier score (lower is better) | 0.0697 | **0.0625** |
-| ROC AUC | 0.962 | 0.962 |
+| Brier (lower better) | 0.0503 ± 0.0034 | **0.0454 ± 0.0032** |
+| ROC AUC | 0.9779 | 0.9774 |
+
+AUC change: mean **−0.0005**, max single-seed **0.0011** — small, real, and not zero (isotonic
+ties can nudge ranking). A test asserts `|Δauc| < 0.005`.
 
 ![Reliability diagram](images/probability_calibration.png)
-
 → [`src/probability_calibration.py`](src/probability_calibration.py)
 
 ---
 
 ## 3 · SHAP-driven feature selection
 
-High-dimensional models carry redundant and noise features that add variance
-without signal. Ranking features by mean absolute SHAP value and keeping only
-the top-k preserves performance while shrinking the model **4×**:
+Selecting features *and the count k* is a decision — made on the **validation** set, never the
+test set. Protocol: fit on **train**, rank by mean |SHAP| and choose k on **validation**, report
+once on an **untouched test** set, repeated across 10 seeds:
 
-| Features kept | ROC AUC |
+| Feature set | Test ROC AUC |
 |---|---|
-| Top 8 | 0.962 |
-| Top 10 | 0.976 |
-| **All 40** | 0.975 |
+| All 40 features | 0.981 ± 0.007 |
+| Validation-selected (median **k = 10**) | **0.981 ± 0.006** |
 
-![SHAP feature selection](images/shap_feature_selection.png)
+The selected ~10 features **match the full 40-feature model on held-out test data within noise**
+— ~4× fewer *input features* (not a claim about model size or inference cost).
+
+![SHAP selection on validation](images/shap_feature_selection.png)
 ![SHAP importance](images/shap_importance.png)
-
 → [`src/shap_feature_selection.py`](src/shap_feature_selection.py)
 
 ---
 
 ## 4 · Feature drift detection
 
-A deployed model silently degrades when the live data distribution drifts from
-training. Population Stability Index (PSI) and the Kolmogorov–Smirnov test flag
-*which* features have shifted — here a mean shift and a scale change trip the
-alert threshold, while the stable features stay near zero:
+When live data drifts from training data a model can silently degrade. Population Stability
+Index (PSI) and the Kolmogorov–Smirnov test flag *which* features shifted:
 
 | Feature | PSI | Status |
 |---|---|---|
@@ -118,19 +119,22 @@ alert threshold, while the stable features stay near zero:
 | feature_4 (moderate shift) | 0.24 | watch |
 | stable features | < 0.01 | ok |
 
-![Drift detection](images/drift_detection.png)
+Caveats kept honest: PSI's 0.1 / 0.25 bands are **heuristics, not laws**; the KS **p-value** is
+sample-size-driven (≈0 for any real shift at large n) and needs multiple-testing correction, so
+the demo also reports the KS **D-statistic** (an effect size). And **input drift is an
+early-warning signal, not proof of model degradation** — it triggers investigation/retraining,
+it doesn't by itself mean accuracy dropped.
 
+![Drift detection](images/drift_detection.png)
 → [`src/drift_detection.py`](src/drift_detection.py)
 
 ---
 
 ## Notebook walkthrough
-
-A narrative version with all four demos and inline results:
+A narrative version with all four demos:
 [`notebooks/portfolio_walkthrough.ipynb`](notebooks/portfolio_walkthrough.ipynb)
 
 ## Run it
-
 ```bash
 pip install -r requirements.txt
 python run_all.py          # run all four demos, regenerate every figure
@@ -138,20 +142,14 @@ python run_all.py          # run all four demos, regenerate every figure
 # development
 pip install -r requirements-dev.txt
 pytest -q                  # each demo's headline result is asserted here
-ruff check src tests
+ruff check src tests && ruff format --check src tests
 ```
-
-Results are deterministic (fixed seeds); CI runs the tests and all demos on every
-push.
+Results are deterministic per seed and reported across seeds. CI runs the tests, all demos, and
+the notebook on every push.
 
 ## About
-
-I'm a self-taught machine learning engineer who designed and operates an
-end-to-end production ML system — real-time ingestion, large-scale feature
-engineering, GPU-accelerated gradient-boosted ensembles, calibration,
-walk-forward backtesting, and automated daily retraining with monitoring and
-rollback. This repository distills the core methods into small, reproducible
-examples.
+Self-taught machine learning engineer focused on production-ML methods — leakage-safe
+validation, calibration, feature selection, and drift monitoring.
 
 **Stack:** Python · scikit-learn · XGBoost · SHAP · SciPy · pandas · NumPy · matplotlib
 

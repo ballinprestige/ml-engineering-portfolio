@@ -1,34 +1,38 @@
-"""Encode each demo's headline claim as an assertion.
+"""Enforce each demo's headline claim — including the ones the README states.
 
-Results are deterministic (fixed seeds), so these tests are stable in CI. Sizes
-are reduced for speed; the relationships they assert hold at full scale too.
+Sizes/seed-counts are reduced for CI speed; results are deterministic so the assertions are
+stable. These test the actual claims (out-of-sample direction, AUC-near-invariance under
+calibration, validation-selected SHAP matching full on an untouched test set), not just that
+the scripts run.
 """
+
 import drift_detection as drift
 import probability_calibration as cal
 import shap_feature_selection as sfs
 import walk_forward_validation as wfv
 
 
-def test_kfold_overstates_on_timeseries():
-    r = wfv.evaluate(n=3000, n_splits=5)
-    assert r["kfold_mean"] > 0.6          # the model learns a real signal
-    assert r["walk_mean"] > 0.5           # walk-forward still beats chance
-    assert r["kfold_mean"] > r["walk_mean"]  # K-fold is optimistically high (leakage)
+def test_temporal_validation_optimism_is_positive():
+    r = wfv.evaluate(n=3000, n_blocks=5, seeds=range(4))
+    assert r["trust_mean"] > 0.5  # model learns a real signal
+    assert r["leak_mean"] > r["trust_mean"]  # peeking at the test era inflates AUC
+    assert r["optimism_mean"] > 0  # holds in aggregate across seeds
 
 
-def test_calibration_improves_brier():
-    r = cal.evaluate(n=5000, n_estimators=150)
-    assert r["auc"] > 0.85
-    assert r["brier_cal"] < r["brier_uncal"]   # calibration lowers Brier
+def test_calibration_lowers_brier_without_moving_ranking():
+    r = cal.evaluate(n=6000, n_estimators=150, seeds=range(3))
+    assert r["brier_cal_mean"] < r["brier_uncal_mean"]  # calibration helps
+    assert r["auc_delta_max_abs"] < 0.005  # ranking near-unchanged (measured, not assumed)
 
 
-def test_shap_pruning_preserves_auc():
-    r = sfs.evaluate(n=4000, n_features=30, ks=(10,))
-    assert r["top10_auc"] >= r["full_auc"] - 0.03   # 10 features ~= all 30
+def test_shap_selection_matches_full_on_untouched_test():
+    r = sfs.evaluate(n=4000, n_features=30, seeds=range(3), grid=(5, 10, 15, 30))
+    assert r["k_median"] < r["n_features"]  # genuinely fewer features
+    assert abs(r["topk_test_mean"] - r["full_test_mean"]) < 0.02  # within noise on the TEST set
 
 
 def test_drift_flags_shifted_features():
     r = drift.evaluate(n=4000)
-    assert r["psi"][0] > drift.ALERT      # mean-shifted feature is flagged
-    assert r["psi"][1] < drift.WATCH      # stable feature is not
+    assert r["psi"][0] > drift.ALERT  # mean-shifted feature is flagged
+    assert r["psi"][1] < drift.WATCH  # stable feature is not
     assert "feature_0" in r["flagged"]

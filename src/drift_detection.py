@@ -9,6 +9,7 @@ against a shifted "production" sample using two standard monitors:
 
 `evaluate()` returns the metrics (importable + testable); `main()` adds the plots.
 """
+
 from __future__ import annotations
 
 import os
@@ -26,7 +27,9 @@ SEED = 42
 WATCH, ALERT = 0.1, 0.25
 
 
-def population_stability_index(ref: np.ndarray, cur: np.ndarray, bins: int = 10, eps: float = 1e-6) -> float:
+def population_stability_index(
+    ref: np.ndarray, cur: np.ndarray, bins: int = 10, eps: float = 1e-6
+) -> float:
     """PSI between a reference and current 1-D sample using reference quantile bins."""
     edges = np.quantile(ref, np.linspace(0, 1, bins + 1))
     edges[0], edges[-1] = -np.inf, np.inf
@@ -40,9 +43,9 @@ def make_reference_and_current(n: int = 6000, n_features: int = 6, seed: int = S
     rng = np.random.default_rng(seed)
     ref = rng.normal(0, 1, (n, n_features))
     cur = rng.normal(0, 1, (n, n_features))
-    cur[:, 0] += 1.2                          # feature 0: mean shift
-    cur[:, 2] *= 1.8                          # feature 2: scale change
-    cur[:, 4] = rng.normal(0.5, 1.0, n)       # feature 4: moderate mean shift
+    cur[:, 0] += 1.2  # feature 0: mean shift
+    cur[:, 2] *= 1.8  # feature 2: scale change
+    cur[:, 4] = rng.normal(0.5, 1.0, n)  # feature 4: moderate mean shift
     names = [f"feature_{i}" for i in range(n_features)]
     return ref, cur, names
 
@@ -50,11 +53,17 @@ def make_reference_and_current(n: int = 6000, n_features: int = 6, seed: int = S
 def evaluate(n: int = 6000, n_features: int = 6, seed: int = SEED) -> dict[str, Any]:
     ref, cur, names = make_reference_and_current(n=n, n_features=n_features, seed=seed)
     psi = np.array([population_stability_index(ref[:, i], cur[:, i]) for i in range(n_features)])
-    ks_p = np.array([ks_2samp(ref[:, i], cur[:, i]).pvalue for i in range(n_features)])
+    ks = [ks_2samp(ref[:, i], cur[:, i]) for i in range(n_features)]
+    # The KS *statistic* (D, an effect size) is the actionable quantity; the p-value is
+    # sample-size-driven (near 0 for any real shift at large n) and needs multiple-testing
+    # correction across features. PSI is the primary monitor here.
+    ks_stat = np.array([k.statistic for k in ks])
+    ks_p = np.array([k.pvalue for k in ks])
     flagged = [names[i] for i in range(n_features) if psi[i] > ALERT]
     return {
         "names": names,
         "psi": psi,
+        "ks_stat": ks_stat,
         "ks_pvalues": ks_p,
         "flagged": flagged,
         "ref": ref,
@@ -64,11 +73,11 @@ def evaluate(n: int = 6000, n_features: int = 6, seed: int = SEED) -> dict[str, 
 
 def main() -> None:
     r = evaluate()
-    print(f"{'feature':<12}{'PSI':>8}{'KS p-value':>14}   status")
+    print(f"{'feature':<12}{'PSI':>8}{'KS D':>8}{'KS p':>12}   status")
     for i, name in enumerate(r["names"]):
         psi = r["psi"][i]
         status = "ALERT" if psi > ALERT else ("watch" if psi > WATCH else "stable")
-        print(f"{name:<12}{psi:>8.3f}{r['ks_pvalues'][i]:>14.2e}   {status}")
+        print(f"{name:<12}{psi:>8.3f}{r['ks_stat'][i]:>8.3f}{r['ks_pvalues'][i]:>12.1e}   {status}")
     print("drift-flagged features:", ", ".join(r["flagged"]) or "none")
 
     colors = ["#c0392b" if p > ALERT else "#e0a64d" if p > WATCH else "#1f3a5f" for p in r["psi"]]
@@ -82,7 +91,9 @@ def main() -> None:
     ax1.legend()
 
     worst = int(np.argmax(r["psi"]))
-    ax2.hist(r["ref"][:, worst], bins=40, alpha=0.6, color="#1f3a5f", label="reference", density=True)
+    ax2.hist(
+        r["ref"][:, worst], bins=40, alpha=0.6, color="#1f3a5f", label="reference", density=True
+    )
     ax2.hist(r["cur"][:, worst], bins=40, alpha=0.6, color="#c0392b", label="current", density=True)
     ax2.set_title(f"Most-drifted feature: {r['names'][worst]} (PSI {r['psi'][worst]:.2f})")
     ax2.set_xlabel("value")

@@ -7,18 +7,25 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
       - name: Lint
-        run: ruff check src tests run_all.py
+        run: |
+          ruff check src tests run_all.py
+          ruff format --check src tests run_all.py
       - name: Test
         run: pytest -q
       - name: Smoke-run all demos
         run: python run_all.py
+      - name: Execute notebook
+        run: jupyter nbconvert --to notebook --execute --inplace notebooks/portfolio_walkthrough.ipynb
