@@ -1,14 +1,10 @@
 """Run every demo end to end and regenerate all figures.
 
-Usage:
-    python run_all.py
+Requires the package installed: `pip install -e .`
+Usage: python run_all.py
 """
 
 import importlib
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
 DEMOS = [
     "walk_forward_validation",

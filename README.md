@@ -12,8 +12,8 @@ its **headline claim is enforced by a test in CI** — measured out-of-sample, r
 std across seeds, not a single lucky number.
 
 > Scope note: four demos isolate a single concept on **synthetic benchmarks**; one runs
-> end-to-end on a **messy real public dataset**; and a **FastAPI service** (model registry +
-> Docker) serves the trained, calibrated model. Reproducible and CI-tested throughout.
+> end-to-end on a **messy real public dataset**; and a **fail-fast FastAPI service** serves one
+> immutable, checksummed model artifact (with a Docker build + live endpoint smoke test in CI).
 
 ## Contents
 - [Production pipeline (reference architecture)](#production-pipeline-reference-architecture)
@@ -41,8 +41,9 @@ flowchart LR
     I -->|"alert: investigate / retrain"| C
 ```
 
-Schema checks gate the data *before* training; calibration is part of *validation*; shadow
-comparison and rollback are one *promotion gate*; drift monitoring closes the loop.
+A **reference** architecture. This repo implements the validation, calibration,
+drift-monitoring, and serving boxes (plus a versioned artifact store); the
+shadow-comparison / rollback promotion gate is shown for context and is **not** implemented here.
 
 ---
 
@@ -144,7 +145,7 @@ an untouched test split:
 | | value |
 |---|---|
 | Impossible-zero values recoded as missing | **652** (across 768 rows) |
-| Test ROC AUC | 0.817 ± 0.030 |
+| Test ROC AUC | 0.817 ± 0.030 (variability across 5 splits, not a formal CI) |
 | Brier (uncalibrated → calibrated) | 0.1708 → 0.1683 |
 
 ![Real-data pipeline](images/real_data_pipeline.png)
@@ -152,20 +153,30 @@ an untouched test split:
 
 ---
 
-## Serving (FastAPI + model registry + Docker)
+## Serving (FastAPI + artifact store + Docker)
 
-The methods above ship as a small but real service: a FastAPI app serves the trained, calibrated
-model, backed by a versioned model registry with artifact lineage.
+**Training is a separate release step.** The service loads one immutable, checksum-verified
+artifact and **fails fast** if none exists — it never trains on the fly.
 
-- **Train + register** — `python -m service.train` fits the calibrated pipeline (recode → impute →
-  scale → gradient boosting → isotonic calibration, fit on train only) and writes a versioned
-  artifact + `metadata.json` (metrics, feature list, data source, library versions, timestamp) to
-  `models/registry/`.
-- **Serve** — `uvicorn service.app:app` exposes `GET /health` (liveness + model version),
-  `GET /model` (metadata/lineage), and `POST /predict` (Pydantic-validated input — the schema
-  gate — returns a calibrated probability, each request logged). Trains a model on first startup
-  if the registry is empty.
-- **Containerized** — `docker build -t ml-portfolio-service . && docker run -p 8000:8000 ml-portfolio-service`. CI builds the image on every push.
+- **Train / release** — `python -m service.train` fits the calibrated end-to-end pipeline (recode
+  impossible zeros → median-impute → scale → gradient boosting → **sigmoid/Platt** calibration
+  (sigmoid, not isotonic, because the calibration split is small), fit on the training split only)
+  and writes a versioned, SHA-256'd artifact + rich `metadata.json` lineage
+  (git SHA, seed, split sizes, hyperparameters, data + artifact checksums, library/python
+  versions, decision threshold, baseline vs calibrated metrics) to `models/registry/`.
+- **Serve** — `uvicorn service.app:app` exposes:
+  - `GET /health` (liveness) · `GET /ready` (readiness — model loaded; 503 if not)
+  - `GET /model` (full lineage / metadata)
+  - `POST /predict` — strict Pydantic contract (bounded, typed, `extra="forbid"`) → calibrated
+    probability + the model's decision threshold; one structured JSON log line per request with a
+    request id and latency.
+- **Container** — non-root, serving-only locked dependencies, package installed (no `PYTHONPATH`
+  hacks), model **baked at build time**: `docker build -t svc . && docker run -p 8000:8000 svc`.
+  CI builds it, runs it, and curls the endpoints (including a `422` for out-of-range input).
+
+> The model is a **demonstration** on the Pima dataset (women of Pima heritage, age 21+) — not
+> medical advice. See the [model card](model_card.md) for population limits, threshold rationale,
+> and fairness notes.
 
 ```python
 import requests
@@ -173,7 +184,7 @@ requests.post("http://localhost:8000/predict", json={
     "pregnancies": 6, "glucose": 148, "blood_pressure": 72, "skin_thickness": 35,
     "insulin": 0, "bmi": 33.6, "diabetes_pedigree": 0.627, "age": 50,
 }).json()
-# -> {"probability": 0.7, "prediction": 1, "model_version": 1}
+# -> {"probability": 0.68, "prediction": 1, "threshold": 0.5, "model_version": 1, "disclaimer": "..."}
 ```
 
 ---
@@ -185,15 +196,20 @@ A narrative version with the four synthetic demos:
 ## Run it
 ```bash
 pip install -r requirements.txt
-python run_all.py          # run all four demos, regenerate every figure
+pip install -e .            # install the package — no sys.path hacks
+python run_all.py          # run all 5 demos, regenerate every figure
 
 # development
 pip install -r requirements-dev.txt
-pytest -q                  # each demo's headline result is asserted here
+pytest -q                  # demo numbers + service/registry behavior are asserted
 ruff check src tests && ruff format --check src tests
+
+# serve
+python -m service.train    # release step: train + register an immutable artifact
+uvicorn service.app:app    # http://localhost:8000  — /health /ready /model /predict
 ```
-Results are deterministic per seed and reported across seeds. CI runs the tests, all demos, and
-the notebook on every push.
+Results are deterministic per seed. CI runs the tests, all demos, the notebook, and a Docker
+build + live endpoint smoke test on every push.
 
 ## About
 Self-taught machine learning engineer focused on production-ML methods — leakage-safe

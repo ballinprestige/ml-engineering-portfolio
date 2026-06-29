@@ -1,47 +1,78 @@
-"""Service tests via FastAPI's TestClient (no running server / Docker needed).
+"""Service tests via FastAPI's TestClient — liveness/readiness, lineage, the strict input
+contract (out-of-range / missing / extra fields), and threshold/probability consistency.
 
-Using TestClient as a context manager triggers the app lifespan, which trains and registers a
-model if the registry is empty — so these tests exercise the full train -> register -> serve path.
+A registered model is guaranteed by the session fixture in conftest.py (the release step).
 """
 
 from fastapi.testclient import TestClient
 
 from service.app import app
 
+VALID = {
+    "pregnancies": 6,
+    "glucose": 148,
+    "blood_pressure": 72,
+    "skin_thickness": 35,
+    "insulin": 0,
+    "bmi": 33.6,
+    "diabetes_pedigree": 0.627,
+    "age": 50,
+}
 
-def test_health_and_model_metadata():
+
+def test_health_is_liveness():
     with TestClient(app) as client:
-        h = client.get("/health")
-        assert h.status_code == 200
-        assert h.json()["status"] == "ok"
-        assert h.json()["model_version"] >= 1
-
-        m = client.get("/model")
-        assert m.status_code == 200
-        assert "auc" in m.json()["metrics"]
-        assert m.json()["features"][1] == "glucose"
+        r = client.get("/health")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
 
 
-def test_predict_returns_calibrated_probability():
+def test_ready_and_model_lineage():
     with TestClient(app) as client:
-        payload = {
-            "pregnancies": 6,
-            "glucose": 148,
-            "blood_pressure": 72,
-            "skin_thickness": 35,
-            "insulin": 0,
-            "bmi": 33.6,
-            "diabetes_pedigree": 0.627,
-            "age": 50,
-        }
-        r = client.post("/predict", json=payload)
+        rd = client.get("/ready")
+        assert rd.status_code == 200 and rd.json()["ready"] is True
+
+        meta = client.get("/model").json()
+        for key in (
+            "git_sha",
+            "training_seed",
+            "data_sha256",
+            "artifact_sha256",
+            "hyperparameters",
+            "split",
+            "decision_threshold",
+        ):
+            assert key in meta, f"missing lineage field: {key}"
+        assert "baseline_uncalibrated" in meta["metrics"]
+        assert "calibrated" in meta["metrics"]
+
+
+def test_predict_is_consistent_and_traceable():
+    with TestClient(app) as client:
+        r = client.post("/predict", json=VALID)
         assert r.status_code == 200
         body = r.json()
         assert 0.0 <= body["probability"] <= 1.0
-        assert body["prediction"] in (0, 1)
+        # prediction is exactly (probability >= threshold) — they can never disagree
+        assert body["prediction"] == int(body["probability"] >= body["threshold"])
+        assert "X-Request-ID" in r.headers
 
 
-def test_predict_rejects_invalid_input():
+def test_rejects_out_of_range_inputs():
     with TestClient(app) as client:
-        r = client.post("/predict", json={"glucose": 100})  # missing required fields
-        assert r.status_code == 422
+        absurd = {
+            **VALID,
+            "glucose": 999999,
+            "blood_pressure": 99999,
+            "age": 999,
+            "pregnancies": 999,
+        }
+        assert client.post("/predict", json=absurd).status_code == 422
+
+
+def test_rejects_missing_and_unexpected_fields():
+    with TestClient(app) as client:
+        assert client.post("/predict", json={"glucose": 100}).status_code == 422  # missing fields
+        assert (
+            client.post("/predict", json={**VALID, "ssn": "x"}).status_code == 422
+        )  # extra forbidden
