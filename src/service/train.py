@@ -33,6 +33,7 @@ from .preprocessing import FEATURES, recode_zeros
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA = os.path.join(ROOT, "data", "pima_diabetes.csv")
+LOCK = os.path.join(ROOT, "requirements-service.lock")
 DECISION_THRESHOLD = 0.5  # default; should be tuned to the cost of false +/- (see model_card.md)
 
 
@@ -100,17 +101,13 @@ def train_and_register(seed: int = 42) -> dict:
         "framework": f"scikit-learn {sklearn.__version__}",
         "python_version": platform.python_version(),
         "git_sha": _git_sha(),
+        "dependency_lock_sha256": _sha256_file(LOCK) if os.path.exists(LOCK) else "unknown",
         "training_seed": seed,
         "data_source": "Pima Indians Diabetes (UCI/OpenML id 37)",
         "data_file": "data/pima_diabetes.csv",
         "data_sha256": _sha256_file(DATA),
         "split": {"train": int(len(X_tr)), "calibration": int(len(X_cal)), "test": int(len(X_te))},
-        "hyperparameters": {
-            "n_estimators": hp["n_estimators"],
-            "learning_rate": hp["learning_rate"],
-            "max_depth": hp["max_depth"],
-            "subsample": hp["subsample"],
-        },
+        "hyperparameters": {k: v for k, v in hp.items()},  # complete normalized param set
         "calibration": "sigmoid",
         "decision_threshold": DECISION_THRESHOLD,
         "features": FEATURES,

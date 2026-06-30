@@ -61,11 +61,14 @@ def save_model(model, metadata: dict[str, Any]) -> dict[str, Any]:
     joblib.dump(model, tmp)
     os.replace(tmp, model_path)
 
+    checksum = _sha256(model_path)
     meta = {
         **metadata,
         "version": version,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "artifact_sha256": _sha256(model_path),
+        "artifact_sha256": checksum,
+        # public identifier: git commit + artifact digest, not a bare integer version
+        "model_id": f"{metadata.get('git_sha', 'unknown')}-{checksum[:8]}",
     }
     _write_json_atomic(os.path.join(vdir, "metadata.json"), meta)
     # publish the pointer LAST, atomically — readers never see a partial version

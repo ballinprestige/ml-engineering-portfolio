@@ -33,4 +33,5 @@ class Prediction(BaseModel):
     prediction: int
     threshold: float
     model_version: int
+    model_id: str
     disclaimer: str = _DISCLAIMER

@@ -100,19 +100,25 @@ def predict(features: Features, request: Request):
     meta = _state["meta"]
     threshold = meta["decision_threshold"]
     x = np.array([[getattr(features, name) for name in FEATURES]], dtype=float)
-    prob = round(float(_state["model"].predict_proba(x)[:, 1][0]), 4)
-    pred = int(prob >= threshold)  # decided on the value we return, so they never disagree
+    raw = float(_state["model"].predict_proba(x)[:, 1][0])
+    pred = int(raw >= threshold)  # decide on the RAW probability, never the rounded display value
+    probability = round(raw, 6)
     log.info(
         json.dumps(
             {
                 "request_id": request.state.request_id,
                 "event": "prediction",
-                "probability": prob,
+                "probability": probability,
                 "prediction": pred,
+                "model_id": meta.get("model_id"),
                 "model_version": meta["version"],
             }
         )
     )
     return Prediction(
-        probability=prob, prediction=pred, threshold=threshold, model_version=meta["version"]
+        probability=probability,
+        prediction=pred,
+        threshold=threshold,
+        model_version=meta["version"],
+        model_id=meta.get("model_id", "unknown"),
     )

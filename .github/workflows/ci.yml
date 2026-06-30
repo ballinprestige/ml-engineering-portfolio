@@ -29,14 +29,14 @@ jobs:
       - name: Smoke-run all demos
         run: python run_all.py
       - name: Execute notebook (does not modify the committed file)
-        run: jupyter nbconvert --to notebook --execute --stdout notebooks/portfolio_walkthrough.ipynb > /dev/null
+        run: python -m nbconvert --to notebook --execute --stdout notebooks/portfolio_walkthrough.ipynb > /dev/null
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build service image
-        run: docker build -t ml-portfolio-service .
+      - name: Build service image (with real commit SHA)
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} -t ml-portfolio-service .
       - name: Run container and smoke-test endpoints
         run: |
           docker run -d -p 8000:8000 --name svc ml-portfolio-service
@@ -49,8 +49,16 @@ jobs:
           curl -sf -X POST http://localhost:8000/predict \
             -H 'Content-Type: application/json' \
             -d '{"pregnancies":6,"glucose":148,"blood_pressure":72,"skin_thickness":35,"insulin":0,"bmi":33.6,"diabetes_pedigree":0.627,"age":50}'
+          # out-of-range input is rejected
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/predict \
             -H 'Content-Type: application/json' -d '{"pregnancies":999,"glucose":999999,"blood_pressure":1,"skin_thickness":1,"insulin":1,"bmi":1,"diabetes_pedigree":1,"age":999}')
           test "$code" = "422" || { echo "expected 422 for absurd input, got $code"; docker logs svc; exit 1; }
-          echo "non-root user:"; docker exec svc whoami | grep -qx appuser || { echo "container not running as appuser"; exit 1; }
+          # runs as a non-root user
+          docker exec svc whoami | grep -qx appuser || { echo "container not running as appuser"; exit 1; }
+          # metadata carries the REAL commit SHA, not "unknown"
+          sha=$(curl -sf http://localhost:8000/model | python3 -c "import sys,json;print(json.load(sys.stdin)['git_sha'])")
+          test "$sha" = "${{ github.sha }}" || { echo "git_sha mismatch: got '$sha'"; docker logs svc; exit 1; }
+          # the baked artifact is read-only to the runtime user
+          docker exec svc sh -c 'p=$(ls /app/models/registry/v*/model.joblib); if [ -w "$p" ]; then echo WRITABLE; exit 1; fi' \
+            || { echo "artifact is writable by the runtime user"; docker logs svc; exit 1; }
           docker rm -f svc

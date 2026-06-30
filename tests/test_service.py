@@ -4,9 +4,15 @@ contract (out-of-range / missing / extra fields), and threshold/probability cons
 A registered model is guaranteed by the session fixture in conftest.py (the release step).
 """
 
+import json
+import logging
+
+import pytest
 from fastapi.testclient import TestClient
 
-from service.app import app
+import service.app as appmod
+from service import registry
+from service.app import app, load_model
 
 VALID = {
     "pregnancies": 6,
@@ -76,3 +82,33 @@ def test_rejects_missing_and_unexpected_fields():
         assert (
             client.post("/predict", json={**VALID, "ssn": "x"}).status_code == 422
         )  # extra forbidden
+
+
+def test_startup_fails_without_artifact(tmp_path, monkeypatch):
+    # the service refuses to serve when no model is registered (fail fast on an empty registry)
+    monkeypatch.setattr(registry, "REGISTRY", str(tmp_path / "empty"))
+    with pytest.raises(FileNotFoundError):
+        load_model()
+
+
+def test_ready_returns_503_when_no_model(monkeypatch):
+    # /ready reports 503 until a model is loaded; build a client WITHOUT lifespan so state stays empty
+    monkeypatch.setattr(appmod, "_state", {})
+    client = TestClient(app)  # not used as a context manager -> lifespan does not run
+    r = client.get("/ready")
+    assert r.status_code == 503
+    assert r.json()["ready"] is False
+
+
+def test_prediction_emits_structured_log(caplog):
+    with caplog.at_level(logging.INFO, logger="service"), TestClient(app) as client:
+        client.post("/predict", json=VALID)
+    parsed = [
+        json.loads(rec.getMessage())
+        for rec in caplog.records
+        if rec.name == "service" and rec.getMessage().strip().startswith("{")
+    ]
+    prediction_logs = [p for p in parsed if p.get("event") == "prediction"]
+    request_logs = [p for p in parsed if "latency_ms" in p]
+    assert prediction_logs and "model_id" in prediction_logs[0]
+    assert request_logs and "request_id" in request_logs[0]

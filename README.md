@@ -161,18 +161,23 @@ artifact and **fails fast** if none exists — it never trains on the fly.
 - **Train / release** — `python -m service.train` fits the calibrated end-to-end pipeline (recode
   impossible zeros → median-impute → scale → gradient boosting → **sigmoid/Platt** calibration
   (sigmoid, not isotonic, because the calibration split is small), fit on the training split only)
-  and writes a versioned, SHA-256'd artifact + rich `metadata.json` lineage
-  (git SHA, seed, split sizes, hyperparameters, data + artifact checksums, library/python
-  versions, decision threshold, baseline vs calibrated metrics) to `models/registry/`.
+  and writes a versioned, SHA-256'd artifact + **full** `metadata.json` lineage to
+  `models/registry/`: git SHA, a `model_id` (git SHA + artifact digest), seed, split sizes, the
+  **complete** estimator hyperparameters, data + artifact + **dependency-lock** SHA-256s,
+  library/python versions, decision threshold, and baseline-vs-calibrated metrics.
 - **Serve** — `uvicorn service.app:app` exposes:
   - `GET /health` (liveness) · `GET /ready` (readiness — model loaded; 503 if not)
   - `GET /model` (full lineage / metadata)
   - `POST /predict` — strict Pydantic contract (bounded, typed, `extra="forbid"`) → calibrated
     probability + the model's decision threshold; one structured JSON log line per request with a
     request id and latency.
-- **Container** — non-root, serving-only locked dependencies, package installed (no `PYTHONPATH`
-  hacks), model **baked at build time**: `docker build -t svc . && docker run -p 8000:8000 svc`.
-  CI builds it, runs it, and curls the endpoints (including a `422` for out-of-range input).
+- **Container** — **digest-pinned** base image; **hash-locked** serving deps
+  (`requirements-service.lock` — full transitive set + hashes); package installed (no `PYTHONPATH`
+  hacks); and the model **baked at build time as root** so it is **read-only / immutable** to the
+  non-root runtime user. The real commit is injected via build arg:
+  `docker build --build-arg GIT_SHA=$(git rev-parse HEAD) -t svc . && docker run -p 8000:8000 svc`.
+  CI builds, runs, and asserts the endpoints, the `422`, non-root, a **real git SHA in the
+  metadata**, and that the baked artifact is **not writable** at runtime.
 
 > The model is a **demonstration** on the Pima dataset (women of Pima heritage, age 21+) — not
 > medical advice. See the [model card](model_card.md) for population limits, threshold rationale,
@@ -184,7 +189,8 @@ requests.post("http://localhost:8000/predict", json={
     "pregnancies": 6, "glucose": 148, "blood_pressure": 72, "skin_thickness": 35,
     "insulin": 0, "bmi": 33.6, "diabetes_pedigree": 0.627, "age": 50,
 }).json()
-# -> {"probability": 0.68, "prediction": 1, "threshold": 0.5, "model_version": 1, "disclaimer": "..."}
+# -> {"probability": 0.680803, "prediction": 1, "threshold": 0.5,
+#     "model_version": 1, "model_id": "<git_sha>-<digest>", "disclaimer": "..."}
 ```
 
 ---
@@ -204,8 +210,9 @@ pip install -r requirements-dev.txt
 pytest -q                  # demo numbers + service/registry behavior are asserted
 ruff check src tests && ruff format --check src tests
 
-# serve
-python -m service.train    # release step: train + register an immutable artifact
+# serve — the release env IS the lock (identical to the Docker image; demos use requirements.txt)
+pip install --require-hashes -r requirements-service.lock
+python -m service.train    # release step: train + register an immutable, checksummed artifact
 uvicorn service.app:app    # http://localhost:8000  — /health /ready /model /predict
 ```
 Results are deterministic per seed. CI runs the tests, all demos, the notebook, and a Docker
