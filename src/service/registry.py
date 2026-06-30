@@ -40,6 +40,9 @@ def _write_json_atomic(path: str, obj: dict) -> None:
     os.close(fd)
     with open(tmp, "w") as f:
         json.dump(obj, f, indent=2)
+    os.chmod(
+        tmp, 0o644
+    )  # mkstemp is 0600; publish world-readable (root-owned, not writable by others)
     os.replace(tmp, path)
 
 
@@ -60,6 +63,7 @@ def save_model(model, metadata: dict[str, Any]) -> dict[str, Any]:
     tmp = model_path + ".tmp"
     joblib.dump(model, tmp)
     os.replace(tmp, model_path)
+    os.chmod(model_path, 0o644)  # readable by the non-root runtime user, writable only by root
 
     checksum = _sha256(model_path)
     meta = {
