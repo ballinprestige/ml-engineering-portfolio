@@ -1,0 +1,31 @@
+{
+  "measured_at_utc": "2026-08-15T06:31:44.793547+00:00",
+  "scope": "single-host HTTP benchmark; not a distributed-scale or production-traffic claim",
+  "requests": 500,
+  "concurrency": 16,
+  "succeeded": 500,
+  "failed": 0,
+  "elapsed_seconds": 0.978,
+  "throughput_requests_per_second": 511.177,
+  "latency": {
+    "mean_ms": 31.012,
+    "p50_ms": 28.207,
+    "p95_ms": 48.103,
+    "p99_ms": 81.303,
+    "max_ms": 90.419
+  },
+  "model": {
+    "model_id": "ec20d84-1caeeecd",
+    "version": 2,
+    "git_sha": "ec20d84",
+    "artifact_sha256": "1caeeecd6a207e3756cbe44cf2a8396a37d4a657c8024ade669ad647f9b93ff7"
+  },
+  "runtime": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "logical_cpu_count": 24
+  },
+  "errors": []
+}

@@ -17,6 +17,7 @@ std across seeds, not a single lucky number.
 
 ## Contents
 - [Production pipeline (reference architecture)](#production-pipeline-reference-architecture)
+- [Engineering evidence](ENGINEERING_EVIDENCE.md) — claim-to-code ledger and HTTP benchmark
 - [1 · Leakage-safe time-series validation](#1--leakage-safe-time-series-validation)
 - [2 · Probability calibration](#2--probability-calibration)
 - [3 · SHAP-driven feature selection](#3--shap-driven-feature-selection)
